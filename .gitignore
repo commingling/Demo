@@ -1,0 +1,58 @@
+/demo.iml
+/demo-book/target/classes/rebel.xml
+/demo-book/target/maven-archiver/pom.properties
+/demo-book/target/maven-status/maven-compiler-plugin/compile/default-compile/createdFiles.lst
+/demo-book/target/maven-status/maven-compiler-plugin/compile/default-compile/inputFiles.lst
+/demo-book/target/demo-book-1.0-SNAPSHOT.jar
+/demo-book/demo-book.iml
+/demo-book/src/main/resources/rebel.xml
+/demo-Gateway/target/classes/application.yml
+/demo-Gateway/target/maven-archiver/pom.properties
+/demo-Gateway/target/maven-status/maven-compiler-plugin/compile/default-compile/createdFiles.lst
+/demo-Gateway/target/maven-status/maven-compiler-plugin/compile/default-compile/inputFiles.lst
+/demo-Gateway/target/demo-Gateway-1.0-SNAPSHOT.jar
+/demo-Search/target/classes/rebel.xml
+/demo-Search/target/maven-archiver/pom.properties
+/demo-Search/target/maven-status/maven-compiler-plugin/compile/default-compile/createdFiles.lst
+/demo-Search/target/maven-status/maven-compiler-plugin/compile/default-compile/inputFiles.lst
+/demo-Search/target/demo-Search-1.0-SNAPSHOT.jar
+/demo-Search/src/main/resources/rebel.xml
+/demo-Search/demo-Search.iml
+HELP.md
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**
+!**/src/test/**
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+*/rebel.xml
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+build/
+
+### VS Code ###
+.vscode/
+Desktop.ini
+
+### MAC ###
+.DS_Store
+/demo-book/src/main/resources/rebel.xml
+/demo-Search/src/main/resources/rebel.xml
