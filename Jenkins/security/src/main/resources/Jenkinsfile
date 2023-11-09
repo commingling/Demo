@@ -1,0 +1,306 @@
+import groovy.transform.Field
+
+@Field def deployedServers = [] // 用于跟踪已成功部署的服务器
+@Field def rolledBackServers = [] // 部署失败-回滚成功的服务器
+@Field def failedServers = [] //部署失败且回滚也失败的服务器
+@Field def pid = ''
+
+
+// 定义服务器IP地址
+def allServers = ['172.16.1.24', '172.16.0.237', '172.16.1.160', '172.16.0.242', '172.16.1.54', '172.16.1.146', '172.16.0.148', '172.16.0.192', '172.16.1.2']
+
+@NonCPS
+def addToList(List list, def value) {
+    list << value
+}
+
+@NonCPS
+def print() {
+        echo "部署成功的服务器: ${deployedServers.join(", ")}"
+        echo "部署失败-回滚成功的服务器: ${rolledBackServers.join(", ")}"
+        echo "部署失败且回滚也失败的服务器: ${failedServers.join(", ")}"
+}
+
+pipeline {
+    agent any
+
+    environment {
+        GIT_REPO_URL = 'git@120.53.91.142:gloryfares/security-api-parent.git'
+        APP_NAME = 'security'
+        PORT = "9011"
+        CREDENTIALS_ID = '573a984f-8ed4-4fdb-9ffd-6dc6c2875030'
+        DEPLOY_PATH = '/home/www'
+        SSH_PORT = '4331'
+        JAVA_HOME = '/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.392.b08-2.el7_9.x86_64' // 设置JAVA_HOME
+        PATH = "/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.392.b08-2.el7_9.x86_64/bin:${env.PATH}" // 将Java可执行文件添加到PATH中
+        MAVEN_TOOL = 'apache-maven-3.8.8'
+    }
+
+    tools {
+        maven "${MAVEN_TOOL}"
+    }
+
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+        timeout(time: 30, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+    }
+
+    parameters {
+        gitParameter (branch:'', branchFilter: '.*', defaultValue: 'origin/master', description: '选择将要构建的分支', name: 'BRANCH', quickFilterEnabled: true, selectedValue: 'TOP', sortMode: 'DESCENDING_SMART', tagFilter: '*', type: 'PT_BRANCH_TAG', useRepository: env.GIT_URL)
+        // 在Choice参数中使用所有服务器
+        choice(name: 'APP_IP', choices: ['all'] + allServers, description: '选择要发布的主机')
+    }
+
+    stages {
+        stage('拉取代码') {
+            failFast true
+            steps {
+                echo "拉取代码阶段"
+                checkout([$class: 'GitSCM',
+                          branches: [[name: "$BRANCH"]],
+                          doGenerateSubmoduleConfigurations: false,
+                          extensions: [],
+                          userRemoteConfigs: [[credentialsId: "${CREDENTIALS_ID}",
+                                               url: "${GIT_REPO_URL}"]]
+                ])
+            }
+        }
+
+        stage('Maven构建') {
+            failFast true
+            steps {
+                script {
+                    echo "Maven构建阶段"
+                    sh """
+                        if [ -d "/usr/local/maven/repository/com/voyawiser" ];then
+                            rm -rf /usr/local/maven/repository/com/voyawiser
+                        fi
+                        if [ -d "/usr/local/maven/repository/com/gloryfares" ];then
+                            rm -rf /usr/local/maven/repository/com/gloryfares
+                        fi
+                    """
+                    // 使用Maven设置finalName来动态命名JAR文件
+                    sh "${env.MAVEN_HOME}/bin/mvn clean install -Pprod -U -Dmaven.test.skip=true"
+
+                    // 解析生成的JAR文件名
+                    def jarName = sh(script: "ls ${WORKSPACE}/${env.APP_NAME}-web-resources/target/*.jar | xargs -n 1 basename", returnStdout: true).trim()
+                    echo "找到的JAR文件名: ${jarName}"
+
+                    // 将找到的JAR文件名设置为环境变量，以供后续使用
+                    env.JAR_NAME = jarName
+
+                }
+            }
+        }
+
+        stage('部署') {
+            failFast true
+            options {
+                timeout(time: 30, unit: 'MINUTES') // 设置为30分钟
+            }
+            steps {
+                echo "部署阶段"
+                script {
+                    echo "获取服务器列表"
+                    if (params.APP_IP.toLowerCase() == 'all') {
+                        servers =  allServers
+                    } else {
+                        servers = ["$APP_IP"]
+                    }
+                    servers.each { server ->
+                        try {
+                            deployToServer(server)
+                        } catch (Exception e) {
+                            echo "部署失败于 ${server}"
+                            rollback(server)
+                            throw e // 重新抛出异常以停止Pipeline
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('部署结果汇总') {
+            steps {
+                script {
+                    echo "部署成功的服务器: ${deployedServers.join(", ")}"
+                    echo "部署失败-回滚成功的服务器: ${rolledBackServers.join(", ")}"
+                    echo "部署失败且回滚也失败的服务器: ${failedServers.join(", ")}"
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                echo "部署成功的服务器: ${deployedServers.join(", ")}"
+                echo "部署失败-回滚成功的服务器: ${rolledBackServers.join(", ")}"
+                echo "部署失败且回滚也失败的服务器: ${failedServers.join(", ")}"
+            }
+            echo '清理任务等逻辑'
+
+            archiveArtifacts artifacts: 'target/*.jar', allowEmptyArchive: true
+
+            echo '自定义通知或报告生成'
+
+            echo 'Pipeline执行完成'
+        }
+    }
+}
+
+def deployToServer(server) {
+    echo "部署到 www@${server}"
+    // 获取BRANCH参数值
+    def branchParam = params.BRANCH
+    // 备份旧版本的jar包
+    sh """
+        ssh -p ${env.SSH_PORT} www@${server} '
+            if [ -f ${env.DEPLOY_PATH}/${env.APP_NAME}/${env.APP_NAME}.jar ]; then
+                mv ${env.DEPLOY_PATH}/${env.APP_NAME}/${env.APP_NAME}.jar ${env.DEPLOY_PATH}/${env.APP_NAME}/${env.APP_NAME}-backup.jar
+                ls -l ${env.DEPLOY_PATH}/${env.APP_NAME}
+                echo "备份旧版本成功"
+            else
+                echo "无需备份，旧版本文件不存在"
+            fi
+        '
+    """
+    // 传输新版本的jar包
+    try {
+        // 检查 ${env.APP_NAME} 文件夹是否存在，不存在则创建
+        sh """
+            if ssh -p ${env.SSH_PORT} www@${server} '[ ! -d ${env.DEPLOY_PATH}/${env.APP_NAME} ]'; then
+                ssh -p ${env.SSH_PORT} www@${server} 'mkdir -p ${env.DEPLOY_PATH}/${env.APP_NAME}'
+                echo "创建 ${env.APP_NAME} 文件夹成功"
+            fi
+        """
+
+        sh "scp -P ${env.SSH_PORT} ${WORKSPACE}/${env.APP_NAME}-web-resources/target/${env.JAR_NAME} www@${server}:${env.DEPLOY_PATH}/${env.APP_NAME}/${env.APP_NAME}.jar"
+    } catch (Exception e) {
+        echo "传输新版本的jar包失败"
+        throw e // 重新抛出异常以停止Pipeline
+    }
+    def startScript = "ssh -p ${env.SSH_PORT} www@${server} 'sh ${env.DEPLOY_PATH}/start.sh ${env.APP_NAME}'"
+
+    try {
+        // 执行启动脚本，将标准输出保存到变量中
+        def output = sh(script: startScript, returnStdout: true).trim()
+        // 输出启动脚本的标准输出
+        echo "脚本输出: ${output}"
+
+        try {
+            // 使用正则表达式匹配输出中的PID
+            def matcher = output =~ /Start successful, PID: (\d+)/
+
+            if (matcher.find()) {
+                // 安全地获取第一个匹配组（PID）
+                echo "matcher输出: ${matcher.group(1)}"
+
+                pid = matcher.group(1)
+                echo "Captured PID: ${pid}"
+            } else {
+                echo "No PID found in the output."
+                // 如果需要，这里可以抛出一个异常或进行错误处理
+            }
+        } catch (Exception e) {
+            echo "处理匹配过程中捕获到异常: ${e.toString()}"
+            // 进一步的错误处理...
+        }
+
+        // 获取上一条命令的退出状态
+        def exitStatus = sh(script: "echo \$?", returnStatus: true)
+
+        // 输出退出状态
+        echo "脚本退出状态: ${exitStatus}"
+
+        // 根据退出状态判断启动是否成功
+        if (exitStatus == 0 && checkDeploymentStatus(server)) {
+            echo "启动成功"
+            addToList(deployedServers, server)// 添加服务器到列表
+
+        } else {
+            error("启动失败")
+            // 在这里调用回滚函数
+            rollback(server)
+
+            // 可以选择抛出异常或采取其他措施
+            error("启动失败，执行回滚操作")
+
+        }
+    } catch (Exception e) {
+        echo "捕获到异常: ${e.getMessage()}"
+        // 可以选择抛出异常或采取其他措施
+        error("启动失败")
+        // 在这里调用回滚函数
+        rollback(server)
+
+        // 可以选择抛出异常或采取其他措施
+        error("启动失败，执行回滚操作")
+
+    }
+}
+
+def rollback(server) {
+    echo "执行回滚操作于 ${server}"
+    try {
+        // 恢复旧版本的jar包
+        sh """
+            if ssh -p ${env.SSH_PORT} www@${server} '[ -f ${env.DEPLOY_PATH}/${env.APP_NAME}/${env.APP_NAME}-backup.jar ]'; then
+                ssh -p ${env.SSH_PORT} www@${server} 'mv ${env.DEPLOY_PATH}/${env.APP_NAME}/${env.APP_NAME}-backup.jar ${env.DEPLOY_PATH}/${env.APP_NAME}/${env.APP_NAME}.jar'
+                ssh -p ${env.SSH_PORT} www@${server} 'sh start.sh ${env.APP_NAME}'
+                echo "旧版本恢复成功"
+            else
+                echo "旧版本文件不存在"
+            fi
+        """
+        addToList(rolledBackServers, server)// 添加服务器到列表
+    } catch (Exception e) {
+        echo "回滚失败于 ${server}: ${e.getMessage()}"
+        // 这里可以加入更多的错误处理逻辑
+        addToList(failedServers, server)// 添加服务器到列表
+        print()
+        throw e // 重新抛出异常以停止Pipeline
+    }
+}
+
+// 检查Java进程或健康检查端点
+def checkDeploymentStatus(server) {
+    def maxAttempts = 15 // 最大尝试次数，总共尝试时间由此参数和sleep时间决定
+    def attempt = 1
+    while (attempt <= maxAttempts) {
+        sleep(time: 10, unit: 'SECONDS') // 如果健康检查失败，暂停10秒再次尝试
+        // 使用 ps 命令通过 SSH 查找 Java 进程
+        def psCommand = "ssh -p 4331 www@${server} 'ps aux | grep ${APP_NAME}.jar | grep ${pid} | grep -v grep'"
+
+        def processList = sh(script: psCommand, returnStdout: true).trim()
+        echo "Attempt ${attempt}: Checking if the Java process for ${APP_NAME} exists..."
+
+        if (processList.contains("${APP_NAME}")) {
+            echo "Java process exists. Attempting health check..."
+
+            // 尝试访问健康检查端点
+            def healthCheckUrl = "http://${server}:${env.PORT}/stapi/actuator/health" // 根据实际情况调整端口和路径
+            try {
+                def healthCheckResponse = sh(script: "curl -s ${healthCheckUrl}", returnStdout: true).trim()
+                if (healthCheckResponse.contains('"status":"UP"')) {
+                    echo "Health Check: UP"
+                    return true // 健康检查成功
+                } else {
+                    echo "Health check response did not indicate UP status. Response: ${healthCheckResponse}"
+                }
+            } catch (Exception e) {
+                echo "Health check request failed: ${e.getMessage()}"
+            }
+        } else {
+            echo "Java process for ${APP_NAME} does not exist."
+            return false // Java进程不存在
+        }
+
+        attempt++
+    }
+
+    echo "Health check failed after ${maxAttempts} attempts or Java process no longer exists."
+    return false // 所有尝试都失败或进程不存在
+}

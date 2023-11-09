@@ -1,0 +1,89 @@
+pipeline {
+    agent any
+	environment{
+        docker_hub_host='192.168.32.141:5000' 
+        docker_hub_user='test'
+        docker_hub_pwd='test'
+        jenkins_workspace='/var/lib/jenkins/workspace'
+	}
+    options {
+        buildDiscarder logRotator(artifactDaysToKeepStr: '', artifactNumToKeepStr: '', daysToKeepStr: '15', numToKeepStr: '200')
+        disableConcurrentBuilds()
+        skipStagesAfterUnstable()
+        timeout(20)
+    }
+
+	stages{
+		stage('拉取代码'){
+			steps{
+				script{
+                    currentBuild.description = "[${deploy_env}] ${app_name} / ${branch}"
+				    git branch: "${branch}", credentialsId: 'jenkinsFile_user', url: 'https://gitee.com/li-jinshan/${app_name}.git'
+				}
+		    }
+	    }
+	    stage('编译&打包'){
+	        steps{
+	            script{
+	                sh '/usr/local/gradle/gradle-5.1/bin/gradle packageJar'
+        		}
+        	}
+        }
+        stage('构建镜像'){
+            steps{
+                script{
+                    imageName="${docker_hub_host}/${app_name}"
+                    time = sh(returnStdout: true ,script: "date +%Y%m%d%H%M").trim()
+                    image = "${docker_hub_host}/${app_name}:${time}"
+                    sh "docker build -t ${image} -f Dockerfile --build-arg latest_jar_name=${app_name}.jar ."
+                }
+            }
+        }
+        
+        stage('推送镜像'){
+            steps{
+                script{
+                    sh "docker login -u ${docker_hub_user} -p ${docker_hub_pwd} http://${docker_hub_host}"
+                    sh "docker push ${image}"
+                   // sh "docker rmi ${image}"
+                    sh "docker logout http://${docker_hub_host}"
+                }
+            }
+        }
+
+        stage('更新版本文件'){
+            steps{
+                sh '''
+                     echo $app_name >> ${jenkins_workspace}/app_list_tmp
+                     sort -u ${jenkins_workspace}/app_list_tmp > ${jenkins_workspace}/app_list
+                     cat ${jenkins_workspace}/app_list > ${jenkins_workspace}/app_list_tmp
+                     //docker images|grep "\\b${app_name}\\b" |awk '{print \$1\":\"\$2}' > ${jenkins_workspace}/ServiceManager/version/$app_name
+                     curl -u ${docker_hub_user}:${docker_hub_pwd} -s http://${docker_hub_host}/v2/$app_name/tags/list |jq .tags |awk -F'"' '{for(i=1;i<=NF;i+=2)$i=""}{print $0}' >${jenkins_workspace}/ServiceManager/version/${app_name}_tmp
+                     sort -u -r ${jenkins_workspace}/ServiceManager/version/${app_name}_tmp > ${jenkins_workspace}/ServiceManager/version/${app_name}
+                     rm -rf ${jenkins_workspace}/ServiceManager/version/${app_name}_tmp
+                '''
+            }
+        }
+
+        stage('拉取镜像&启动服务'){
+            steps{
+                script{
+                    build job: 'ServiceManager', parameters: [string(name: 'app_name', value: "${app_name}"),string(name: 'deploy_env', value: "${deploy_env}"),string(name: 'image_tag', value: "${time}")]
+                }
+            }
+        }
+    }
+    post {
+        always {
+            onCompleted("${currentBuild.currentResult}")
+        }
+    }
+}
+
+def onCompleted(status) {
+    if(status == 'SUCCESS'){
+      sh "curl https://sc.ftqq.com/SCU41635Tde3f47f8ff53c77c8b143226cb4ecb7b5c871d7ba955a.send?text=SUCCESS"
+    }else{
+      sh "curl https://sc.ftqq.com/SCU41635Tde3f47f8ff53c77c8b143226cb4ecb7b5c871d7ba955a.send?text=FALILURE"
+    }
+}

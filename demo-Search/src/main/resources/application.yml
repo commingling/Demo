@@ -1,0 +1,20 @@
+
+spring:
+  application:
+    name: demo-search-service # 微服务的名称
+  cloud:
+    nacos:
+      discovery:
+        server-addr: 127.0.0.1:8848 # Nacos服务地址
+        watch:
+          enabled: true # 开启服务变更监听
+    gateway:
+      routes:
+        - id: book-service
+          uri: lb://demo-book # 使用服务ID，假设服务注册名为flight-channel-book-service
+          predicates:
+            - Path=/book-service/** # 定义转发路径
+          filters:
+            - StripPrefix=1 # 移除路径的前缀
+server:
+  port: 3458 # 搜索服务端口
