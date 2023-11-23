@@ -13,6 +13,7 @@
         <module>demo-Gateway</module>
         <module>demo-book</module>
         <module>demo-Search</module>
+        <module>Main</module>
     </modules>
 
     <properties>
