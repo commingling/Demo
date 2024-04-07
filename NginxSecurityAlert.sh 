@@ -1,0 +1,74 @@
+#!/bin/bash
+
+LOG_PATH="/usr/local/nginx/logs/access.log"
+ENDPOINT="/stapi/flight/search"
+
+# 获取当前时间和5分钟前的时间戳
+current_timestamp=$(date +%s)
+five_minutes_ago_timestamp=$(date --date='5 minutes ago' +%s)
+
+# 使用awk处理日志文件
+awk -v endpoint="$ENDPOINT" -v current="$current_timestamp" -v five_minutes_ago="$five_minutes_ago_timestamp" '
+BEGIN {
+    FS="[ \\[\\]:\"]+";
+    total = 0;
+    status_200 = 0;
+    status_401 = 0;
+    msg = ""; # 初始化消息字符串
+}
+
+# 函数：将英文月份缩写转换为数字
+function month_number(month_abbr) {
+    split("Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec", months, " ");
+    for (i = 1; i <= 12; i++) {
+        if (months[i] == month_abbr) return sprintf("%02d", i);
+    }
+    return "00"; # 如果月份不匹配，则返回00
+}
+
+{
+    # 拆分日期字符串
+    split($4, date_parts, "/");
+
+    # 转换月份为数字
+    month = month_number(date_parts[2]);
+
+    # 构建新的日期时间字符串并格式化
+    formatted_date = sprintf("%s %s %s %s %s %s", date_parts[3], month, date_parts[1], $5, $6, $7);
+
+    # 使用mktime函数将日期时间字符串转换为时间戳
+    timestamp = mktime(formatted_date);
+
+    if ($10 == "POST" && $11 == endpoint && timestamp >= five_minutes_ago && timestamp <= current) {
+        total++;
+        ips[$1]++;
+        if ($13 == "200") status_200++;
+        else if ($13 == "401") status_401++;
+
+        print "IP: " $1 ", Request: " $0;
+    }
+}
+
+END {
+    if (total > 0) {
+        start_time = strftime("%Y-%m-%d %H:%M:%S", five_minutes_ago, 0);
+        end_time = strftime(" %H:%M:%S", current, 0);
+        msg = sprintf("C-Prod-NG-IWoflyCN.WEB-北京-154.8.140.253：5分钟内异常请求报警：%s - %s，总共%d个IP发起%d次对%s接口的请求，HTTP 200共%d次，占比%.2f%%，HTTP 401（限流）共%d次，占比%.2f%%。\n", start_time, end_time, length(ips), total, endpoint, status_200, (status_200 / total) * 100, status_401, (status_401 / total) * 100);
+        for (ip in ips) {
+            msg = msg sprintf("IP地址 %s 发起请求 %d 次。\n", ip, ips[ip]);
+        }
+        print msg;
+        if (status_401 > 15) {
+            # 发送钉钉报警
+            cmd = "/usr/local/nginx/logs/send_to_dingtalk.sh \"" msg "\"";
+            system(cmd);
+        }
+    } else {
+        start_time = strftime("%Y-%m-%d %H:%M:%S", five_minutes_ago, 0);
+        end_time = strftime(" %H:%M:%S", current, 0);
+        msg = sprintf("在指定时间范围内，未找到匹配的请求。%s - %s\n", start_time, end_time);
+        print msg;
+    }
+}
+' "$LOG_PATH"
+
