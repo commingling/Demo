@@ -42,11 +42,34 @@ function month_number(month_abbr) {
     if ($10 == "POST" && $11 == endpoint && timestamp >= five_minutes_ago && timestamp <= current) {
         total++;
         ips[$1]++;
-        if ($13 == "200") status_200++;
-        else if ($13 == "401") status_401++;
-
+        if ($13 == "200") {
+            http_200_ips[$1]++;
+            status_200++;
+        } else if ($13 == "401") {
+            http_401_ips[$1]++;
+            status_401++;
+        }
         print "IP: " $1 ", Request: " $0;
     }
+}
+
+function print_sorted(arr, max_count, status) {
+    # 为了兼容性，我们手动创建一个数组来进行排序
+    n = asort(arr, sorted_values, "@val_num_desc");
+    print "\nhttp " status;
+    count = 0;
+    for (i = 1; i <= n; i++) {
+        for (ip in arr) {
+            if (arr[ip] == sorted_values[i] && count < max_count) {
+                print ip "：" sorted_values[i] "次";
+                count++;
+                # 一旦打印，就从数组中删除，避免重复打印相同的计数
+                delete arr[ip];
+                break;
+            }
+        }
+    }
+    if (count == 0) print "无记录";
 }
 
 END {
@@ -54,6 +77,10 @@ END {
         start_time = strftime("%Y-%m-%d %H:%M:%S", five_minutes_ago, 0);
         end_time = strftime(" %H:%M:%S", current, 0);
         msg = sprintf("C-Prod-NG-IWoflyCN.WEB-北京-154.8.140.253：5分钟内异常请求报警：%s - %s，总共%d个IP发起%d次对%s接口的请求，HTTP 200共%d次，占比%.2f%%，HTTP 401（限流）共%d次，占比%.2f%%。\n", start_time, end_time, length(ips), total, endpoint, status_200, (status_200 / total) * 100, status_401, (status_401 / total) * 100);
+        # 打印按请求次数排序的IP列表
+        print_sorted(http_200_ips, 20, 200);
+        print_sorted(http_401_ips, 20, 401);
+
         for (ip in ips) {
             msg = msg sprintf("IP地址 %s 发起请求 %d 次。\n", ip, ips[ip]);
         }
