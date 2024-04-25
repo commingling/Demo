@@ -4,7 +4,7 @@ import time
 
 # 初始化 Elasticsearch 客户端
 es = Elasticsearch(
-    ['https://es-hdcxiyco.public.tencentelasticsearch.com:9200'],
+    ['https://es-2wi3d7tu.public.tencentelasticsearch.com:9200'],
     http_auth=('elastic', 'pikaqiu112.!'),
     timeout=60  # 请求超时时间设置为 60 秒
 )
