@@ -41,7 +41,7 @@ pipeline {
     options {
         timestamps()
         disableConcurrentBuilds()
-        timeout(time: 10, unit: 'MINUTES')
+        timeout(time: 30, unit: 'MINUTES')
         buildDiscarder(logRotator(numToKeepStr: '10'))
     }
 
@@ -148,18 +148,23 @@ pipeline {
 
 def deployToServer(server) {
     echo "部署到 www@${server}"
-    // 获取BRANCH参数值
-    def branchParam = params.BRANCH
+    def backupFolder = "${env.DEPLOY_PATH}/${env.APP_NAME}/backup"
     // 备份旧版本的jar包
     sh """
         ssh -p ${env.SSH_PORT} www@${server} '
+            mkdir -p ${backupFolder}
             if [ -f ${env.DEPLOY_PATH}/${env.APP_NAME}/${env.APP_NAME}.jar ]; then
-                mv ${env.DEPLOY_PATH}/${env.APP_NAME}/${env.APP_NAME}.jar ${env.DEPLOY_PATH}/${env.APP_NAME}/${env.APP_NAME}-backup.jar
-                ls -l ${env.DEPLOY_PATH}/${env.APP_NAME}
-                echo "备份旧版本成功"
+                TIMESTAMP=\$(date +%Y%m%d%H%M%S)
+                cp ${env.DEPLOY_PATH}/${env.APP_NAME}/${env.APP_NAME}.jar ${backupFolder}/${env.APP_NAME}-\$TIMESTAMP.jar
+                echo "备份旧版本成功，文件名为 ${env.APP_NAME}-\$TIMESTAMP.jar"
             else
-                echo "无需备份，旧版本文件不存在"
+                echo "旧版本文件不存在，无需备份"
             fi
+
+            # 保留最近7个备份
+            cd ${backupFolder}
+            ls -t | grep ${env.APP_NAME} | tail -n +8 | xargs rm -f
+            echo "保留最新7个备份"
         '
     """
     // 传输新版本的jar包
@@ -240,22 +245,25 @@ def deployToServer(server) {
 def rollback(server) {
     echo "执行回滚操作于 ${server}"
     try {
-        // 恢复旧版本的jar包
+        // 在备份文件夹中找到最新的备份文件并恢复
         sh """
-            if ssh -p ${env.SSH_PORT} www@${server} '[ -f ${env.DEPLOY_PATH}/${env.APP_NAME}/${env.APP_NAME}-backup.jar ]'; then
-                ssh -p ${env.SSH_PORT} www@${server} 'mv ${env.DEPLOY_PATH}/${env.APP_NAME}/${env.APP_NAME}-backup.jar ${env.DEPLOY_PATH}/${env.APP_NAME}/${env.APP_NAME}.jar'
-                ssh -p ${env.SSH_PORT} www@${server} 'sh start.sh ${env.APP_NAME}'
+            backupFolder="${env.DEPLOY_PATH}/${env.APP_NAME}/backup"
+            latestBackup=\$(ssh -p ${env.SSH_PORT} www@${server} 'ls -t ${backupFolder} | grep ${env.APP_NAME} | head -n 1')
+
+            if [ ! -z "\$latestBackup" ]; then
+                echo "找到最新备份: \$latestBackup"
+                ssh -p ${env.SSH_PORT} www@${server} 'cp ${backupFolder}/\$latestBackup ${env.DEPLOY_PATH}/${env.APP_NAME}/${env.APP_NAME}.jar'
+                ssh -p ${env.SSH_PORT} www@${server} 'sh ${env.DEPLOY_PATH}/start.sh ${env.APP_NAME}'
                 echo "旧版本恢复成功"
             else
-                echo "旧版本文件不存在"
+                echo "没有找到备份文件"
             fi
         """
-        addToList(rolledBackServers, server)// 添加服务器到列表
+        addToList(rolledBackServers, server) // 添加服务器到列表
     } catch (Exception e) {
         echo "回滚失败于 ${server}: ${e.getMessage()}"
         // 这里可以加入更多的错误处理逻辑
-        addToList(failedServers, server)// 添加服务器到列表
-        print()
+        addToList(failedServers, server) // 添加服务器到列表
         throw e // 重新抛出异常以停止Pipeline
     }
 }
