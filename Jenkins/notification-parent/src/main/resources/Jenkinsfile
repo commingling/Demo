@@ -25,7 +25,7 @@ pipeline {
     environment {
         GIT_REPO_URL = 'git@120.53.91.142:gloryfares/notification-parent.git'
         APP_NAME = 'notification'
-        PORT = "9010"
+        PORT = "9800"
         CREDENTIALS_ID = '573a984f-8ed4-4fdb-9ffd-6dc6c2875030'
         DEPLOY_PATH = '/home/www'
         SSH_PORT = '4331'
