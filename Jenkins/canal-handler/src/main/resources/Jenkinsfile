@@ -148,18 +148,23 @@ pipeline {
 
 def deployToServer(server) {
     echo "部署到 www@${server}"
-    // 获取BRANCH参数值
-    def branchParam = params.BRANCH
+    def backupFolder = "${env.DEPLOY_PATH}/${env.APP_NAME}/backup"
     // 备份旧版本的jar包
     sh """
         ssh -p ${env.SSH_PORT} www@${server} '
+            mkdir -p ${backupFolder}
             if [ -f ${env.DEPLOY_PATH}/${env.APP_NAME}/${env.APP_NAME}.jar ]; then
-                mv ${env.DEPLOY_PATH}/${env.APP_NAME}/${env.APP_NAME}.jar ${env.DEPLOY_PATH}/${env.APP_NAME}/${env.APP_NAME}-backup.jar
-                ls -l ${env.DEPLOY_PATH}/${env.APP_NAME}
-                echo "备份旧版本成功"
+                TIMESTAMP=\$(date +%Y%m%d%H%M%S)
+                cp ${env.DEPLOY_PATH}/${env.APP_NAME}/${env.APP_NAME}.jar ${backupFolder}/${env.APP_NAME}-\$TIMESTAMP.jar
+                echo "备份旧版本成功，文件名为 ${env.APP_NAME}-\$TIMESTAMP.jar"
             else
-                echo "无需备份，旧版本文件不存在"
+                echo "旧版本文件不存在，无需备份"
             fi
+
+            # 保留最近7个备份
+            cd ${backupFolder}
+            ls -t | grep ${env.APP_NAME} | tail -n +8 | xargs rm -f
+            echo "保留最新7个备份"
         '
     """
     // 传输新版本的jar包
@@ -276,7 +281,7 @@ def checkDeploymentStatus(server) {
             echo "Java process exists. Attempting health check..."
 
             // 尝试访问健康检查端点
-            def healthCheckUrl = "http://${server}:${env.PORT}/actuator/health" // 根据实际情况调整端口和路径
+            def healthCheckUrl = "http://${server}:${env.PORT}/cpanel-api/actuator/health" // 根据实际情况调整端口和路径
             try {
                 def healthCheckResponse = sh(script: "curl -s ${healthCheckUrl}", returnStdout: true).trim()
                 if (healthCheckResponse.contains('"status":"UP"')) {
