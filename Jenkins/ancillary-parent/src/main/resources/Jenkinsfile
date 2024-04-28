@@ -281,7 +281,7 @@ def checkDeploymentStatus(server) {
             echo "Java process exists. Attempting health check..."
 
             // 尝试访问健康检查端点
-            def healthCheckUrl = "http://${server}:${env.PORT}/cpanel-api/actuator/health" // 根据实际情况调整端口和路径
+            def healthCheckUrl = "http://${server}:${env.PORT}/actuator/health" // 根据实际情况调整端口和路径
             try {
                 def healthCheckResponse = sh(script: "curl -s ${healthCheckUrl}", returnStdout: true).trim()
                 if (healthCheckResponse.contains('"status":"UP"')) {
