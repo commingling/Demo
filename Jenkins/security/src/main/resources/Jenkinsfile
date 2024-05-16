@@ -2,7 +2,7 @@ import groovy.transform.Field
 
 @Field def deployedServers = [] // 用于跟踪已成功部署的服务器
 @Field def rolledBackServers = [] // 部署失败-回滚成功的服务器
-@Field def failedServers = [] //部署失败且回滚也失败的服务器
+@Field def failedServers = [] // 部署失败且回滚也失败的服务器
 @Field def pid = ''
 // 定义服务器IP地址
 def allServers = ['172.16.0.237', '172.16.1.160', '172.16.0.242', '172.16.1.54', '172.16.1.146', '172.16.0.148', '172.16.0.192', '172.16.1.2']
@@ -14,9 +14,9 @@ def addToList(List list, def value) {
 
 @NonCPS
 def print() {
-        echo "部署成功的服务器: ${deployedServers.join(", ")}"
-        echo "部署失败-回滚成功的服务器: ${rolledBackServers.join(", ")}"
-        echo "部署失败且回滚也失败的服务器: ${failedServers.join(", ")}"
+    echo "部署成功的服务器: ${deployedServers.join(", ")}"
+    echo "部署失败-回滚成功的服务器: ${rolledBackServers.join(", ")}"
+    echo "部署失败且回滚也失败的服务器: ${failedServers.join(", ")}"
 }
 
 pipeline {
@@ -46,7 +46,7 @@ pipeline {
     }
 
     parameters {
-        gitParameter (branch:'', branchFilter: '.*', defaultValue: 'origin/master', description: '选择将要构建的分支', name: 'BRANCH', quickFilterEnabled: true, selectedValue: 'TOP', sortMode: 'DESCENDING_SMART', tagFilter: '*', type: 'PT_BRANCH_TAG', useRepository: env.GIT_URL)
+        gitParameter(branch: '', branchFilter: '.*', defaultValue: 'origin/master', description: '选择将要构建的分支', name: 'BRANCH', quickFilterEnabled: true, selectedValue: 'TOP', sortMode: 'DESCENDING_SMART', tagFilter: '*', type: 'PT_BRANCH_TAG', useRepository: env.GIT_URL)
         // 在Choice参数中使用所有服务器
         choice(name: 'APP_IP', choices: ['all'] + allServers, description: '选择要发布的主机')
     }
@@ -88,7 +88,6 @@ pipeline {
 
                     // 将找到的JAR文件名设置为环境变量，以供后续使用
                     env.JAR_NAME = jarName
-
                 }
             }
         }
@@ -99,8 +98,9 @@ pipeline {
                 echo "部署阶段"
                 script {
                     echo "获取服务器列表"
+                    def servers
                     if (params.APP_IP.toLowerCase() == 'all') {
-                        servers =  allServers
+                        servers = allServers
                     } else {
                         servers = ["$APP_IP"]
                     }
