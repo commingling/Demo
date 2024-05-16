@@ -47,8 +47,7 @@ pipeline {
     }
 
     parameters {
-        gitParameter(branch: '', branchFilter: '.*', defaultValue: 'origin/master', description: '选择将要构建的分支', name: 'BRANCH', quickFilterEnabled: true, selectedValue: 'TOP', sortMode: 'DESCENDING_SMART', tagFilter: '*', type: 'PT_BRANCH_TAG', useRepository: env.GIT_URL)
-        // 在Choice参数中使用所有服务器
+        gitParameter (branch:'', branchFilter: '.*', defaultValue: 'origin/master', description: '选择将要构建的分支', name: 'BRANCH', quickFilterEnabled: true, selectedValue: 'TOP', sortMode: 'DESCENDING_SMART', tagFilter: '*', type: 'PT_BRANCH_TAG', useRepository: env.GIT_URL)
         choice(name: 'APP_IP', choices: ['all'] + allServers, description: '选择要发布的主机')
     }
 
@@ -89,6 +88,7 @@ pipeline {
 
                     // 将找到的JAR文件名设置为环境变量，以供后续使用
                     env.JAR_NAME = jarName
+
                 }
             }
         }
@@ -218,77 +218,77 @@ def deployToServer(server) {
         }
     } catch (Exception e) {
         echo "捕获到异常: ${e.getMessage()}"
-        // 在这里调用回滚函数
-        rollback(server)
+                // 在这里调用回滚函数
+                rollback(server)
+    // 可以选择抛出异常或采取其他措施
+    error("启动失败，执行回滚操作")
 
-        // 可以选择抛出异常或采取其他措施
-        error("启动失败，执行回滚操作")
-
-    }
+}
 }
 
 def rollback(server) {
-    echo "执行回滚操作于 ${server}"
-    try {
-        // 在备份文件夹中找到最新的备份文件并恢复
-        sh """
-            backupFolder="${env.DEPLOY_PATH}/${env.APP_NAME}/backup"
-            latestBackup=\$(ssh -p ${env.SSH_PORT} www@${server} 'ls -t ${backupFolder} | grep ${env.APP_NAME} | head -n 1')
-
-            if [ ! -z "\$latestBackup" ]; then
-                echo "找到最新备份: \$latestBackup"
-                ssh -p ${env.SSH_PORT} www@${server} 'cp ${backupFolder}/\$latestBackup ${env.DEPLOY_PATH}/${env.APP_NAME}/${env.APP_NAME}.jar'
-                ssh -p ${env.SSH_PORT} www@${server} 'sh ${env.DEPLOY_PATH}/start.sh ${env.APP_NAME}'
-                echo "旧版本恢复成功"
-            else
-                echo "没有找到备份文件"
-            fi
-        """
-        addToList(rolledBackServers, server) // 添加服务器到列表
-    } catch (Exception e) {
-        echo "回滚失败于 ${server}: ${e.getMessage()}"
-        // 这里可以加入更多的错误处理逻辑
-        addToList(failedServers, server) // 添加服务器到列表
-        throw e // 重新抛出异常以停止Pipeline
-    }
+echo "执行回滚操作于 ${server}"
+try {
+// 在备份文件夹中找到最新的备份文件并恢复
+sh """
+backupFolder="${env.DEPLOY_PATH}/${env.APP_NAME}/backup"
+latestBackup=$(ssh -p ${env.SSH_PORT} www@${server} 'ls -t ${backupFolder} | grep ${env.APP_NAME} | head -n 1')
+        if [ ! -z "\$latestBackup" ]; then
+            echo "找到最新备份: \$latestBackup"
+            ssh -p ${env.SSH_PORT} www@${server} 'cp ${backupFolder}/\$latestBackup ${env.DEPLOY_PATH}/${env.APP_NAME}/${env.APP_NAME}.jar'
+            ssh -p ${env.SSH_PORT} www@${server} 'sh ${env.DEPLOY_PATH}/start.sh ${env.APP_NAME}'
+            echo "旧版本恢复成功"
+        else
+            echo "没有找到备份文件"
+        fi
+    """
+    addToList(rolledBackServers, server) // 添加服务器到列表
+} catch (Exception e) {
+    echo "回滚失败于 ${server}: ${e.getMessage()}"
+    // 这里可以加入更多的错误处理逻辑
+    addToList(failedServers, server) // 添加服务器到列表
+    throw e // 重新抛出异常以停止Pipeline
+}
 }
 
 // 检查Java进程或健康检查端点
 def checkDeploymentStatus(server) {
-    def maxAttempts = 15 // 最大尝试次数，总共尝试时间由此参数和sleep时间决定
-    def attempt = 1
-    while (attempt <= maxAttempts) {
-        sleep(time: 10, unit: 'SECONDS') // 如果健康检查失败，暂停10秒再次尝试
-        // 使用 ps 命令通过 SSH 查找 Java 进程
-        def psCommand = "ssh -p 4331 www@${server} 'ps aux | grep ${APP_NAME}.jar | grep ${pid} | grep -v grep'"
+def maxAttempts = 15 // 最大尝试次数，总共尝试时间由此参数和sleep时间决定
+def attempt = 1
+while (attempt <= maxAttempts) {
+sleep(time: 10, unit: 'SECONDS') // 如果健康检查失败，暂停10秒再次尝试
+// 使用 ps 命令通过 SSH 查找 Java 进程
+def psCommand = "ssh -p 4331 www@${server} 'ps aux | grep ${APP_NAME}.jar | grep ${pid} | grep -v grep'"
 
-        def processList = sh(script: psCommand, returnStdout: true).trim()
-        echo "Attempt ${attempt}: Checking if the Java process for ${APP_NAME} exists..."
+    def processList = sh(script: psCommand, returnStdout: true).trim()
+    echo "Attempt ${attempt}: Checking if the Java process for ${APP_NAME} exists..."
 
-        if (processList.contains("${APP_NAME}")) {
-            echo "Java process exists. Attempting health check..."
+    if (processList.contains("${APP_NAME}")) {
+        echo "Java process exists. Attempting health check..."
 
-            // 尝试访问健康检查端点
-            def healthCheckUrl = "http://${server}:${env.PORT}/stapi/actuator/health" // 根据实际情况调整端口和路径
-            try {
-                def healthCheckResponse = sh(script: "curl -s ${healthCheckUrl}", returnStdout: true).trim()
-                if (healthCheckResponse.contains('"status":"UP"')) {
-                    echo "Health Check: UP"
-                    return true // 健康检查成功
-                } else {
-                    echo "Health check response did not indicate UP status. Response: ${healthCheckResponse}"
-                }
-            } catch (Exception e) {
-                echo "Health check request failed: ${e.getMessage()}"
+        // 尝试访问健康检查端点
+        def healthCheckUrl = "http://${server}:${env.PORT}/stapi/actuator/health" // 根据实际情况调整端口和路径
+        try {
+            def healthCheckResponse = sh(script: "curl -s ${healthCheckUrl}", returnStdout: true).trim()
+            if (healthCheckResponse.contains('"status":"UP"')) {
+                echo "Health Check: UP"
+                return true // 健康检查成功
+            } else {
+                echo "Health check response did not indicate UP status. Response: ${healthCheckResponse}"
             }
-        } else {
-            echo "Java process for ${APP_NAME} does not exist."
-            return false // Java进程不存在
+        } catch (Exception e) {
+            echo "Health check request failed: ${e.getMessage()}"
         }
-
-        attempt++
+    } else {
+        echo "Java process for ${APP_NAME} does not exist."
+        return false // Java进程不存在
     }
 
-    echo "Health check failed after ${maxAttempts} attempts or Java process no longer exists."
-    return false // 所有尝试都失败或进程不存在
+    attempt++
 }
+
+echo "Health check failed after ${maxAttempts} attempts or Java process no longer exists."
+return false // 所有尝试都失败或进程不存在
+}
+
+
