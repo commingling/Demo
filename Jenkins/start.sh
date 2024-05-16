@@ -19,7 +19,7 @@ if [ -n "$pid" ]; then
     echo "Waiting for $APP_NAME to stop..."
 
     # 等待进程停止，最多等待一定的时间（例如 30 秒）
-    timeout=60
+    timeout=30
     while [ $timeout -gt 0 ]; do
         if ! ps -p $pid > /dev/null; then
             echo "$APP_NAME stopped successfully."
@@ -34,6 +34,10 @@ if [ -n "$pid" ]; then
         echo "Force stopping $APP_NAME (PID: $pid)"
         sudo kill -9 $pid
     fi
+
+    # 等待额外的时间确保系统释放内存
+    echo "Waiting additional time for memory release..."
+    sleep 30
 fi
 
 ####### Start  #########
@@ -51,4 +55,3 @@ else
     echo "Start failed, see $LOG_FILE for details"
     exit 1  # Exit with an error code
 fi
-
