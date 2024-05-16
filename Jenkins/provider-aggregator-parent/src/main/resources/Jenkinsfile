@@ -13,10 +13,10 @@ def addToList(List list, def value) {
 }
 
 @NonCPS
-def print() {
-        echo "部署成功的服务器: ${deployedServers.join(", ")}"
-        echo "部署失败-回滚成功的服务器: ${rolledBackServers.join(", ")}"
-        echo "部署失败且回滚也失败的服务器: ${failedServers.join(", ")}"
+def printDeploymentResults() {
+    echo "部署成功的服务器: ${deployedServers.join(", ")}"
+    echo "部署失败-回滚成功的服务器: ${rolledBackServers.join(", ")}"
+    echo "部署失败且回滚也失败的服务器: ${failedServers.join(", ")}"
 }
 
 pipeline {
